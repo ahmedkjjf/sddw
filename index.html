@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <title>تبديل الأسماء</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #name {
+            font-size: 3em;
+            font-weight: bold;
+            transition: color 0.5s;
+        }
+    </style>
+</head>
+<body>
+    <span id="name"></span>
+    <script>
+        var names = [
+            { name: "[ rakoon  ]", color: "#fff" },
+            { name: "[ ahmed L  ]", color: "#ff0000" }
+        ];
+        var nameIndex = 0;
+        function changeNames() {
+            var currentName = names[nameIndex];
+            var nameElem = document.getElementById("name");
+            nameElem.textContent = currentName.name;
+            nameElem.style.color = currentName.color;
+            nameIndex = (nameIndex + 1) % names.length;
+        }
+        changeNames(); // Show first name immediately
+        setInterval(changeNames, 1000);
+    </script>
+</body>
+</html>
